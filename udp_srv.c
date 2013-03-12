@@ -1,4 +1,5 @@
-#include "udp_comm.h"
+#define SRV
+#include "udp_comm.c"
 
 uv_loop_t *loop;
 uv_udp_t send_socket;
