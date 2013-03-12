@@ -2,7 +2,7 @@
 #include "udp_comm.c"
 
 uv_buf_t alloc_buffer (uv_handle_t *handle, size_t suggested_size) {
-	return uv_buf_init ((char*) malloc (suggested_size), suggested_size);
+	return uv_buf_init (malloc (suggested_size), suggested_size);
 }
 
 void echo_write (uv_write_t *req, int status) {
@@ -25,7 +25,7 @@ void echo_read (uv_stream_t *client, ssize_t nread, uv_buf_t buf) {
 		return;
 	}
 
-	uv_write_t *req = (uv_write_t *) malloc (sizeof (uv_write_t));
+	uv_write_t *req = malloc (sizeof (uv_write_t));
 	req->data = (void*) buf.base;
 	uv_write (req, client, &buf, 1, echo_write);
 }
@@ -36,13 +36,15 @@ void on_new_connection (uv_stream_t *server, int status) {
         return;
     }
 
-    uv_tcp_t *client = (uv_tcp_t*) malloc (sizeof (uv_tcp_t));
-    uv_tcp_init (loop, client);
-    if (uv_accept (server, (uv_stream_t*) client) == 0) {
-        uv_read_start ((uv_stream_t*) client, alloc_buffer, echo_read);
+    peer_t *peer = malloc (sizeof (peer_t));
+    uv_tcp_init (loop, &peer->tcpsock);
+    if (uv_accept (server, (uv_stream_t*) &peer->tcpsock) == 0) {
+	    // uv_read_start ((uv_stream_t*) &peer->tcpsock, alloc_buffer, echo_read);
+	    start_peer (peer);
     }
     else {
-        uv_close ((uv_handle_t*) client, NULL);
+        uv_close ((uv_handle_t*) &peer->tcpsock, NULL);
+	free (peer);
     }
 }
 

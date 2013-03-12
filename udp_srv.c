@@ -50,7 +50,7 @@ int main () {
     loop = uv_default_loop();
 
     uv_udp_init(loop, &recv_socket);
-    struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", 1068);
+    struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", 9020);
     uv_udp_bind(&recv_socket, recv_addr, 0);
     uv_udp_recv_start(&recv_socket, alloc_buffer, on_read);
 

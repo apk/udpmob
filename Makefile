@@ -2,9 +2,9 @@ all : exe/udp_clt exe/udp_srv
 
 exe/udp_srv : exe/obj/udp_srv.o
 	mkdir -p exe
-	cc -Bstatic -o exe/udp_srv exe/obj/udp_srv.o ../libuv/libuv.a -framework Foundation \
-           -framework CoreServices \
-           -framework ApplicationServices \
+	cc -Bstatic -o exe/udp_srv exe/obj/udp_srv.o ../libuv/libuv.a \
+	   -framework Foundation \
+           -framework CoreServices -framework ApplicationServices
 
 exe/obj/udp_srv.o : udp_srv.c udp_comm.c
 	mkdir -p exe/obj
@@ -12,9 +12,9 @@ exe/obj/udp_srv.o : udp_srv.c udp_comm.c
 
 exe/udp_clt : exe/obj/udp_clt.o
 	mkdir -p exe
-	cc -Bstatic -o exe/udp_clt exe/obj/udp_clt.o ../libuv/libuv.a -framework Foundation \
-           -framework CoreServices \
-           -framework ApplicationServices \
+	cc -Bstatic -o exe/udp_clt exe/obj/udp_clt.o ../libuv/libuv.a \
+	   -framework Foundation \
+           -framework CoreServices -framework ApplicationServices
 
 exe/obj/udp_clt.o : udp_clt.c udp_comm.c
 	mkdir -p exe/obj
