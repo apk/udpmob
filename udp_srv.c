@@ -5,10 +5,6 @@ uv_loop_t *loop;
 uv_udp_t send_socket;
 uv_udp_t recv_socket;
 
-uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
-    return uv_buf_init((char*) malloc(suggested_size), suggested_size);
-}
-
 void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, unsigned flags) {
     fprintf (stderr, "nread: %d\n", (int)nread);
     if (nread == -1) {

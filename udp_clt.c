@@ -1,10 +1,6 @@
 #define CLT
 #include "udp_comm.c"
 
-uv_buf_t alloc_buffer (uv_handle_t *handle, size_t suggested_size) {
-	return uv_buf_init (malloc (suggested_size), suggested_size);
-}
-
 void echo_write (uv_write_t *req, int status) {
 	if (status == -1) {
 		fprintf (stderr, "Write error %s\n",

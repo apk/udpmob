@@ -5,6 +5,10 @@
 
 uv_loop_t *loop;
 
+uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
+    return uv_buf_init((char*) malloc(suggested_size), suggested_size);
+}
+
 typedef struct peer {
 	uv_tcp_t tcpsock;
 	struct sockaddr_in addr; // Peer addr (current one, for server)
