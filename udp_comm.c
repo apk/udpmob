@@ -34,6 +34,28 @@ void fire (uv_timer_t* handle, int status) {
 	uv_udp_send (req, &p->udp, buf, 1, p->addr, on_send);
 }
 
+void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
+	       struct sockaddr *addr, unsigned flags)
+{
+	fprintf (stderr, "nread: %d\n", (int)nread);
+	if (nread == -1) {
+		fprintf(stderr, "Read error %s\n", uv_err_name(uv_last_error(loop)));
+		uv_close((uv_handle_t*) req, NULL);
+		free(buf.base);
+		return;
+	}
+
+	if (addr) {
+		char sender[17] = { 0 };
+		uv_ip4_name((struct sockaddr_in*) addr, sender, 16);
+		fprintf (stderr, "Recv from %s\n", sender);
+	} else {
+		fprintf(stderr, "Recv from unknown\n");
+	}
+
+	free(buf.base);
+}
+
 void start_peer (peer_t *p) {
 	// Assume tcpsock already set up (non-reading)
 	uv_timer_init (loop, &p->timer);
@@ -43,6 +65,8 @@ void start_peer (peer_t *p) {
 	fprintf (stderr, "start_peer\n");
 
 	uv_udp_init (loop, &p->udp);
+	p->udp.data = p;
 	uv_udp_bind (&p->udp, uv_ip4_addr("0.0.0.0", 0), 0);
+	uv_udp_recv_start (&p->udp, alloc_buffer, udp_recv);
 }
 #endif
