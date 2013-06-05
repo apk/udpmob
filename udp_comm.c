@@ -31,7 +31,7 @@ void fire (uv_timer_t* handle, int status) {
    peer_t *p = handle->data;
    uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
    uv_buf_t *buf = malloc (sizeof (uv_buf_t));
-   buf [0] = uv_buf_init (malloc (1), 0);
+   buf [0] = uv_buf_init (malloc (1), 1);
    fprintf (stderr, "fire %d\n", status);
    uv_udp_send (req, &p->udp, buf, 1, p->addr, on_send);
 }
