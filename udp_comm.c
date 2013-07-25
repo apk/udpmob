@@ -17,6 +17,16 @@ uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
 uv_udp_t recv_socket;
 #endif
 
+typedef struct data {
+   struct data *next;
+   int len;
+   unsigned char buf [1];
+} data_t;
+
+void data_drop (data_t *d) {
+   free (d);
+}
+
 typedef struct peer {
 #ifndef CLT
    struct peer *next;
@@ -24,6 +34,7 @@ typedef struct peer {
    int id;
    int ack; /* Ack to send. */
    int seq; /* Sequence number of first packet in send queue. */
+   data_t *sndlist; /* Enqueued data. */
 
    uv_tcp_t tcpsock;
    struct sockaddr_in addr; // Peer addr (current one for server)
@@ -52,12 +63,15 @@ void dumpbuf(const char *name, uv_buf_t buf, int n) {
 }
 
 void on_send (uv_udp_send_t* req, int status) {
-   fprintf (stderr, "on_send %d\n", status);
+   if (status) {
+      fprintf (stderr, "on_send %d\n", status);
+   }
+   /* XXX Is there anything we might need to free? */
 }
 
 typedef struct sbuf {
    uv_buf_t *buf;
-   int sz;
+   int sz; /* XXX Probably superfluous, and then the whole struct. */
 } sbuf_t;
 
 unsigned char *sbuf_init (sbuf_t *sb, int len) {
@@ -121,10 +135,12 @@ void fire (uv_timer_t* handle, int status) {
    } else {
       peer_send_ack (p);
    }
+   uv_timer_start (&p->timer, fire, 3000, 0);
 }
 #endif
 
 void peer_start (peer_t *p, struct sockaddr_in ad, int id);
+void peer_kill (peer_t *p, const char *why);
 
 int getint (unsigned char *data, int len, int off, int cnt) {
    int v = 0;
@@ -151,6 +167,9 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
    int ack = getint (data, len, 4, 4);
    int pck = getint (data, len, 8, 4);
    fprintf (stderr, "Process(%d)...%d/%x/%d/%d\n", len, id, flg, ack, pck);
+   if (p) {
+      fprintf (stderr, "          %d/%d/%d\n", p->id, p->seq, p->ack);
+   }
    if (len < 4) {
       /* Initial frame; contents are actually irrelevant. */
 #ifndef CLT
@@ -186,7 +205,46 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
       }
 #endif
       return;
-   } else {
+   } else if (len == 8 || len >= 12) {
+      if (!p) {
+#ifndef CLT
+         /* Server-side: We need to find the peer talking to us. */
+         for (p = peerlist; p; p = p->next) {
+            if (p->id == id) break;
+         }
+         if (!p) {
+            fprintf (stderr, "Ignoring unknown peer %d\n", id);
+            return;
+         }
+#else
+         fprintf (stderr, "No peer?\n");
+         return;
+#endif
+      }
+      /* Ok, now we know a peer to work on. */
+#ifdef CLT
+      if (p->id == -1) {
+         AT;
+         /* Pick up our assigned id if we don't have one yet. */
+         p->id = id;
+      } else if (p->id != id) {
+         /* Hey, what's that? */
+         peer_kill (p, "id mismatch");
+         return;
+      }
+#endif
+      /* Process acks first: We can drop packets that we got ack'd. */
+      while (p->seq < ack) {
+         data_t *d = p->sndlist;
+         if (!d) {
+            peer_kill (p, "ack ahead of snd");
+            return;
+         }
+         p->sndlist = d->next;
+         data_drop (d);
+         p->seq ++;
+      }
+
       /* Regular frame:
        * 3 bytes: Connection identity
        * 1 byte: Flags
@@ -205,7 +263,6 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
 void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
                struct sockaddr *addr, unsigned flags)
 {
-   fprintf (stderr, "nread: %d\n", (int)nread);
    if (nread == -1) {
       fprintf(stderr, "Read error %s\n", uv_err_name(uv_last_error(loop)));
       uv_close((uv_handle_t*) req, NULL);
@@ -218,7 +275,9 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
       uv_ip4_name((struct sockaddr_in*) addr, sender, 16);
       fprintf (stderr, "Recv from %s\n", sender);
    } else {
+#if 0
       fprintf(stderr, "Recv from unknown\n");
+#endif
       free(buf.base);
       return;
    }
@@ -248,6 +307,7 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id) {
 
    p->ack = 0;
    p->seq = 0;
+   p->sndlist = 0;
 
 #ifdef CLT
    uv_udp_init (loop, &p->udp);
@@ -255,4 +315,12 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id) {
    uv_udp_bind (&p->udp, uv_ip4_addr("0.0.0.0", 0), 0);
    uv_udp_recv_start (&p->udp, alloc_buffer, udp_recv);
 #endif
+}
+
+void peer_kill (peer_t *p, const char *why) {
+   char sender[17] = { 0 };
+   uv_ip4_name(&p->addr, sender, 16);
+   fprintf (stderr, "peer_kill(%d:%s:%d): %s\n",
+            p->id, sender, ntohs (p->addr.sin_port), why);
+   exit (1);
 }
