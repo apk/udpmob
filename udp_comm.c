@@ -291,7 +291,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             uv_tcp_init (loop, &p->tcpsock);
             req->data = p;
             uv_tcp_connect (req, &p->tcpsock,
-                            uv_ip4_addr ("127.0.0.1", 22),
+                            uv_ip4_addr (remaddr, remport),
                             on_connect);
          }
          peer_send_ack (p);
@@ -366,6 +366,8 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
 
             }
             p->ack ++;
+            /* We processed a packet, send the ack immediately. */
+            sendack = 1;
          }
       }
       peer_send_something (p, sendack);

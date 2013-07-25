@@ -1,6 +1,9 @@
 // -*- mode: C; c-basic-offset: 3; tab-width: 8; indent-tabs-mode: nil -*-
 
-#define SRV
+static char *remaddr = "127.0.0.1";
+static int remport = 22;
+static int localport = 9020;
+
 #include "udp_comm.c"
 
 uv_loop_t *loop;
@@ -47,13 +50,36 @@ void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, 
 }
 #endif
 
-int main () {
+int main (int argc, char **argv) {
+   int i;
+
+   for (i = 1; i < argc; i ++) {
+      switch (argv [i] [0]) {
+      case 'a':
+         remaddr = argv [i] + 1;
+         break;
+      case 'p':
+         remport = atoi (argv [i] + 1);
+         if (!remport) remport = 9000;
+         break;
+      case 'l':
+         localport = atoi (argv [i] + 1);
+         if (!localport) localport = 2222;
+         break;
+      default:
+         fprintf (stderr, "Bad arg %s\n", argv [i]);
+         break;
+      }
+   }
+
+   fprintf (stderr, "%d:%s:%d\n", localport, remaddr, remport);
+
    loop = uv_default_loop();
 
    /* Create upd server socket, and process data.
     */
    uv_udp_init(loop, &recv_socket);
-   struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", 9020);
+   struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", localport);
    uv_udp_bind(&recv_socket, recv_addr, 0);
    recv_socket.data = 0;
    uv_udp_recv_start(&recv_socket, alloc_buffer, udp_recv);
