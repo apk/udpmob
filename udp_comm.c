@@ -8,6 +8,8 @@
 
 #include "uv.h"
 
+static int debug = 0;
+
 uv_loop_t *loop;
 
 uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
@@ -103,8 +105,10 @@ void sbuf_send (sbuf_t *sb, peer_t *p) {
    uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
    char sender[17] = { 0 };
    uv_ip4_name(&p->addr, sender, 16);
-   fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
-   dumpbuf (" =>", *sb->buf, sb->sz);
+   if (debug) {
+      fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
+      dumpbuf (" =>", *sb->buf, sb->sz);
+   }
    uv_udp_send (req,
 #ifdef CLT
                 &p->udp,
@@ -128,7 +132,6 @@ void peer_send_req (peer_t *p) {
    /* Send an initial request frame. */
    sbuf_t S;
    unsigned char *d = sbuf_init (&S, 1);
-   fprintf (stderr, "peer_send_req\n");
    d [0] = 0;
    sbuf_send (&S, p);
 }
@@ -137,7 +140,9 @@ void peer_send_ack (peer_t *p) {
    /* Send an ack-only frame now. */
    sbuf_t S;
    unsigned char *d = sbuf_init (&S, 8);
-   fprintf (stderr, "peer_send_ack(%d,%d)\n", p->id, p->ack);
+   if (debug > 1) {
+      fprintf (stderr, "peer_send_ack(%d,%d)\n", p->id, p->ack);
+   }
    putint (&d, p->id, 3);
    *d ++ = 0;
    putint (&d, p->ack, 4);
@@ -148,8 +153,10 @@ void peer_send_data (peer_t *p) {
    /* Send an data frame now (the first one, or crash if none). */
    sbuf_t S;
    unsigned char *d = sbuf_init (&S, 12 + p->sndlist->len);
-   fprintf (stderr, "peer_send_data(%d,%d,%d,%d)\n",
-            p->id, p->ack, p->seq, p->sndlist->len);
+   if (debug > 1) {
+      fprintf (stderr, "peer_send_data(%d,%d,%d,%d)\n",
+               p->id, p->ack, p->seq, p->sndlist->len);
+   }
    putint (&d, p->id, 3);
    *d ++ = 0;
    putint (&d, p->ack, 4);
@@ -193,7 +200,9 @@ void peer_open (peer_t *p);
 #ifndef CLT
 void on_connect (uv_connect_t *req, int status) {
    peer_t *p = req->data;
-   fprintf (stderr, "on_connect %d\n", status);
+   if (status) {
+      fprintf (stderr, "on_connect %d\n", status);
+   }
    if (status) {
       peer_kill (p, "connect fail");
    } else {
@@ -205,7 +214,9 @@ void on_connect (uv_connect_t *req, int status) {
 
 void on_write (uv_write_t *req, int status) {
    peer_t *p = req->data;
-   fprintf (stderr, "on_write %d\n", status);
+   if (status) {
+      fprintf (stderr, "on_write %d\n", status);
+   }
    if (status) {
       peer_kill (p, "write fail");
    } else {
@@ -217,7 +228,9 @@ void on_write (uv_write_t *req, int status) {
 
 void on_shutdown (uv_shutdown_t *req, int status) {
    peer_t *p = req->data;
-   fprintf (stderr, "on_shutdown %d\n", status);
+   if (status) {
+      fprintf (stderr, "on_shutdown %d\n", status);
+   }
    if (status) {
       peer_kill (p, "shutdown fail");
    } else {
@@ -251,9 +264,11 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
    int flg = getint (data, len, 3, 1);
    int ack = getint (data, len, 4, 4);
    int pck = getint (data, len, 8, 4);
-   fprintf (stderr, "Process(%d)...%d/%x/%d/%d\n", len, id, flg, ack, pck);
-   if (p) {
-      fprintf (stderr, "          %d/%d/%d\n", p->id, p->seq, p->ack);
+   if (debug > 1) {
+      fprintf (stderr, "Process(%d)...%d/%x/%d/%d\n", len, id, flg, ack, pck);
+      if (p) {
+         fprintf (stderr, "          %d/%d/%d\n", p->id, p->seq, p->ack);
+      }
    }
    if (len < 4) {
       /* Initial frame; contents are actually irrelevant. */
@@ -339,8 +354,10 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
       }
       if (len >= 12) {
          /* Have data or EOF */
-         fprintf (stderr, "pck=%d ack=%d open=%d len=%d\n",
-                  pck, p->ack, p->open, len);
+         if (debug > 1) {
+            fprintf (stderr, "pck=%d ack=%d open=%d len=%d\n",
+                     pck, p->ack, p->open, len);
+         }
          if (p->ack > pck) {
             /* Peer sends old packets, get him updated. */
             sendack = 1;
@@ -383,7 +400,6 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
        * empty data packet which means EOF on the connection.
        * Data packets need to contain at least one byte of data.
        */
-      fprintf (stderr, "Regular frame\n");
    }
 }
 
@@ -400,8 +416,11 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
    if (addr) {
       char sender[17] = { 0 };
       uv_ip4_name((struct sockaddr_in*) addr, sender, 16);
-      fprintf (stderr, "Recv from %s:%d\n", sender,
-               ntohs (((struct sockaddr_in *) addr)->sin_port));
+      if (debug) {
+         fprintf (stderr, "Recv from %s:%d\n", sender,
+                  ntohs (((struct sockaddr_in *) addr)->sin_port));
+         dumpbuf (" <=", buf, nread);
+      }
    } else {
 #if 0
       fprintf(stderr, "Recv from unknown\n");
@@ -409,8 +428,6 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
       free(buf.base);
       return;
    }
-
-   dumpbuf (" <=", buf, nread);
 
    process (req->data, buf.base, nread, req, (struct sockaddr_in *)addr);
 
@@ -420,7 +437,6 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
 void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
    data_t *d, **pp;
    peer_t *p = str->data;
-   fprintf (stderr, "** tcp_read: %d\n", nread);
    if (nread == 0) {
       return;
    }
