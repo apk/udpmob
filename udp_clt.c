@@ -15,7 +15,8 @@ void on_new_connection (uv_stream_t *server, int status) {
    peer_t *peer = malloc (sizeof (peer_t));
    uv_tcp_init (loop, &peer->tcpsock);
    if (uv_accept (server, (uv_stream_t*) &peer->tcpsock) == 0) {
-      peer_start (peer, uv_ip4_addr ("127.0.0.1", 9020), -1);
+      peer_start (peer, uv_ip4_addr ("127.0.0.1", 9020), -1, 1);
+      peer_open (peer);
    }
    else {
       uv_close ((uv_handle_t*) &peer->tcpsock, NULL);
