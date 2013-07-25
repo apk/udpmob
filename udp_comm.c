@@ -20,18 +20,17 @@ uv_udp_t recv_socket;
 typedef struct data {
    struct data *next;
    int len;
-   unsigned char *data;
+   unsigned char data [1];
 } data_t;
 
 data_t *data_make (unsigned char *data, int len) {
-   data_t *d = malloc (sizeof (data_t));
-   d->data = data;
+   data_t *d = malloc (sizeof (data_t) + len);
+   if (len) memcpy (d->data, data, len);
    d->len = len;
    return d;
 }
 
 void data_drop (data_t *d) {
-   free (d->data);
    free (d);
 }
 
@@ -53,6 +52,7 @@ typedef struct peer {
    struct sockaddr_in addr; // Peer addr (current one for server)
 #ifdef CLT
    uv_timer_t timer;
+   int pcnt;
 #endif
 #ifdef CLT
    uv_udp_t udp;
@@ -67,6 +67,10 @@ void dumpbuf(const char *name, uv_buf_t buf, int n) {
    int i;
    fprintf (stderr, "%s:   :", name);
    for (i = 0; i < n; i ++) {
+      if (i == 48) {
+         fprintf (stderr, "...+%d\n", n - i);
+         return;
+      }
       if (i && !(i % 16)) {
          fprintf (stderr, "\n%s:%3d:", name, i);
       }
@@ -153,20 +157,31 @@ void peer_send_data (peer_t *p) {
    sbuf_send (&S, p);
 }
 
+void peer_send_something (peer_t *p, int do_ack) {
+   if (p->id == -1) return;
+   if (p->sndlist) {
+      peer_send_data (p);
+   } else if (do_ack) {
+      peer_send_ack (p);
+#ifdef CLT
+      p->pcnt = 20;
+#endif
+   }
+}
+
 #ifdef CLT
 void fire (uv_timer_t* handle, int status) {
    peer_t *p = handle->data;
    if (status) {
       fprintf (stderr, "fire %d\n", status);
    }
+   if (p->pcnt > 0) p->pcnt --;
    if (p->id == -1) {
       peer_send_req (p);
-   } else if (p->sndlist) {
-      peer_send_data (p);
    } else {
-      peer_send_ack (p);
+      peer_send_something (p, p->pcnt < 1);
    }
-   uv_timer_start (&p->timer, fire, 3000, 0);
+   uv_timer_start (&p->timer, fire, 1000, 0);
 }
 #endif
 
@@ -283,7 +298,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
 #endif
       return;
    } else if (len == 8 || len >= 12) {
-      int sendnow = 0;
+      int sendack = 0;
       if (!p) {
 #ifndef CLT
          /* Server-side: We need to find the peer talking to us. */
@@ -320,12 +335,15 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
          p->sndlist = d->next;
          data_drop (d);
          p->seq ++;
-         sendnow = 1;
       }
       if (len >= 12) {
          /* Have data or EOF */
          fprintf (stderr, "pck=%d ack=%d open=%d len=%d\n",
                   pck, p->ack, p->open, len);
+         if (p->ack > pck) {
+            /* Peer sends old packets, get him updated. */
+            sendack = 1;
+         }
          if (pck == p->ack && p->open == 1) {
             /* Packet is in sequence (otherwise we ignore it),
              * and output is open (otherwise we also rely on
@@ -345,13 +363,11 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
                buf [0] = uv_buf_init ((char *)dp, len - 12);
                uv_write (req, (uv_stream_t*)&p->tcpsock, buf, 1, on_write);
 
-               p->ack ++;
             }
+            p->ack ++;
          }
       }
-      if (sendnow) {
-         peer_send_ack (p);
-      }
+      peer_send_something (p, sendack);
 
       /* Regular frame:
        * 3 bytes: Connection identity
@@ -419,13 +435,23 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
          return;
       }
    }
-   d = data_make ((unsigned char *)buf.base, nread);
-   for (pp = &p->sndlist; *pp; pp = &(*pp));
-   d->next = *pp;
-   *pp = d;
-   if (d == p->sndlist && p->open) {
-      peer_send_data (p);
+   for (pp = &p->sndlist; *pp; pp = &(*pp)->next);
+   if (nread < 500) {
+      d = data_make ((unsigned char *)buf.base, nread);
+      d->next = *pp;
+      *pp = d;
+   } else {
+      int p = 0;
+      while (p < nread) {
+         int s = nread - p;
+         d = data_make (p + (unsigned char *)buf.base, s);
+         p += s;
+         d->next = *pp;
+         *pp = d;
+         pp = &d->next;
+      }
    }
+   peer_send_something (p, 0);
    if (nread == 0) p->flags |= FL_IEOF;
 }
 
@@ -434,6 +460,7 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp) {
 #ifdef CLT
    uv_timer_init (loop, &p->timer);
    p->timer.data = p;
+   p->pcnt = 0;
    uv_timer_start (&p->timer, fire, 1000, 0);
 #endif
    p->addr = ad;
