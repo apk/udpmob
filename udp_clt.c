@@ -45,6 +45,9 @@ int main (int argc, char **argv) {
          localport = atoi (argv [i] + 1);
          if (!localport) localport = 2222;
          break;
+      case 'd':
+         debug = atoi (argv [i] + 1);
+         break;
       default:
          fprintf (stderr, "Bad arg %s\n", argv [i]);
          break;
