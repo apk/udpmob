@@ -13,6 +13,10 @@ uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
    return uv_buf_init((char*) malloc(suggested_size), suggested_size);
 }
 
+#ifndef CLT
+uv_udp_t recv_socket;
+#endif
+
 typedef struct peer {
 #ifndef CLT
    struct peer *next;
@@ -47,24 +51,78 @@ void dumpbuf(const char *name, uv_buf_t buf, int n) {
    fprintf (stderr, "\n");
 }
 
-#ifdef CLT
 void on_send (uv_udp_send_t* req, int status) {
    fprintf (stderr, "on_send %d\n", status);
 }
 
-void fire (uv_timer_t* handle, int status) {
-   peer_t *p = handle->data;
-   uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
-   uv_buf_t *buf = malloc (sizeof (uv_buf_t));
-   buf [0] = uv_buf_init (malloc (1), 1);
-   fprintf (stderr, "fire %d\n", status);
-   uv_udp_send (req, &p->udp, buf, 1, p->addr, on_send);
+typedef struct sbuf {
+   uv_buf_t *buf;
+   int sz;
+} sbuf_t;
+
+unsigned char *sbuf_init (sbuf_t *sb, int len) {
+   sb->buf = malloc (sizeof (uv_buf_t));
+   sb->sz = len;
+   sb->buf [0] = uv_buf_init (malloc (len), len);
+   return (unsigned char *)sb->buf->base;
 }
+
+void sbuf_send (sbuf_t *sb, peer_t *p) {
+   uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
+   char sender[17] = { 0 };
+   uv_ip4_name(&p->addr, sender, 16);
+   fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
+   dumpbuf (" =>", *sb->buf, sb->sz);
+   uv_udp_send (req,
+#ifdef CLT
+                &p->udp,
+#else
+                &recv_socket,
 #endif
+                sb->buf, 1, p->addr, on_send);
+}
+
+void putint (unsigned char **dp, int val, int len) {
+   unsigned char *d = *dp;
+   *dp += len;
+   while (len > 0) {
+      len --;
+      d [len] = val;
+      val >>= 8; /* Sign extension will not matter. */
+   }
+}
+
+void peer_send_req (peer_t *p) {
+   /* Send an initial request frame. */
+   sbuf_t S;
+   unsigned char *d = sbuf_init (&S, 1);
+   fprintf (stderr, "peer_send_req\n");
+   d [0] = 0;
+   sbuf_send (&S, p);
+}
 
 void peer_send_ack (peer_t *p) {
    /* Send an ack-only frame now. */
+   sbuf_t S;
+   unsigned char *d = sbuf_init (&S, 8);
+   fprintf (stderr, "peer_send_ack(%d,%d)\n", p->id, p->ack);
+   putint (&d, p->id, 3);
+   *d ++ = 0;
+   putint (&d, p->ack, 4);
+   sbuf_send (&S, p);
 }
+
+#ifdef CLT
+void fire (uv_timer_t* handle, int status) {
+   peer_t *p = handle->data;
+   fprintf (stderr, "fire %d\n", status);
+   if (p->id == -1) {
+      peer_send_req (p);
+   } else {
+      peer_send_ack (p);
+   }
+}
+#endif
 
 void peer_start (peer_t *p, struct sockaddr_in ad, int id);
 
@@ -165,7 +223,7 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
       return;
    }
 
-   dumpbuf ("recv", buf, nread);
+   dumpbuf (" <=", buf, nread);
 
    process (req->data, buf.base, nread, req, (struct sockaddr_in *)addr);
 

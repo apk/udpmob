@@ -4,8 +4,6 @@
 #include "udp_comm.c"
 
 uv_loop_t *loop;
-uv_udp_t send_socket;
-uv_udp_t recv_socket;
 
 #if 0
 void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, unsigned flags) {
