@@ -447,6 +447,7 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
       int p = 0;
       while (p < nread) {
          int s = nread - p;
+         if (s > 480) s = 480;
          d = data_make (p + (unsigned char *)buf.base, s);
          p += s;
          d->next = *pp;
