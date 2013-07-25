@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define AT (fprintf (stderr, "__%s:%d__\n", __FILE__, __LINE__))
 
