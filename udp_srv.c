@@ -7,7 +7,9 @@ uv_loop_t *loop;
 uv_udp_t send_socket;
 uv_udp_t recv_socket;
 
+#if 0
 void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, unsigned flags) {
+
    fprintf (stderr, "nread: %d\n", (int)nread);
    if (nread == -1) {
       fprintf(stderr, "Read error %s\n", uv_err_name(uv_last_error(loop)));
@@ -23,6 +25,8 @@ void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, 
    } else {
       fprintf(stderr, "Recv from unknown\n");
    }
+
+   dumpbuf("B", buf, nread);
 
    // ... DHCP specific code
 
@@ -43,26 +47,18 @@ void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, 
    uv_udp_recv_stop(req);
 #endif
 }
+#endif
 
 int main () {
    loop = uv_default_loop();
 
+   /* Create upd server socket, and process data.
+    */
    uv_udp_init(loop, &recv_socket);
    struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", 9020);
    uv_udp_bind(&recv_socket, recv_addr, 0);
-   uv_udp_recv_start(&recv_socket, alloc_buffer, on_read);
-
-   /*
-     uv_udp_init(loop, &send_socket);
-     uv_udp_bind(&send_socket, uv_ip4_addr("0.0.0.0", 0), 0);
-     uv_udp_set_broadcast(&send_socket, 1);
-
-     uv_udp_send_t send_req;
-     uv_buf_t discover_msg = make_discover_msg(&send_req);
-
-     struct sockaddr_in send_addr = uv_ip4_addr("255.255.255.255", 67);
-     uv_udp_send(&send_req, &send_socket, &discover_msg, 1, send_addr, on_send);
-   */
+   recv_socket.data = 0;
+   uv_udp_recv_start(&recv_socket, alloc_buffer, udp_recv);
 
    return uv_run(loop, UV_RUN_DEFAULT);
 }

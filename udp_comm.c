@@ -12,8 +12,13 @@ uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
 }
 
 typedef struct peer {
+#ifndef CLT
+   struct peer *next;
+#endif
+   int id;
+
    uv_tcp_t tcpsock;
-   struct sockaddr_in addr; // Peer addr (current one, for server)
+   struct sockaddr_in addr; // Peer addr (current one for server)
 #ifdef CLT
    uv_timer_t timer;
 #endif
@@ -21,6 +26,22 @@ typedef struct peer {
    uv_udp_t udp;
 #endif
 } peer_t;
+
+#ifndef CLT
+peer_t *peerlist = 0;
+#endif
+
+void dumpbuf(const char *name, uv_buf_t buf, int n) {
+   int i;
+   fprintf (stderr, "%s:   :", name);
+   for (i = 0; i < n; i ++) {
+      if (i && !(i % 16)) {
+         fprintf (stderr, "\n%s:%3d:", name);
+      }
+      fprintf (stderr, " %02x", buf.base [i] & 255);
+   }
+   fprintf (stderr, "\n");
+}
 
 #ifdef CLT
 void on_send (uv_udp_send_t* req, int status) {
@@ -34,6 +55,81 @@ void fire (uv_timer_t* handle, int status) {
    buf [0] = uv_buf_init (malloc (1), 1);
    fprintf (stderr, "fire %d\n", status);
    uv_udp_send (req, &p->udp, buf, 1, p->addr, on_send);
+}
+#endif
+
+int getint (unsigned char *data, int len, int off, int cnt) {
+   int v = 0;
+   int idx = off;
+   while (cnt > 0) {
+      v = (v << 8) | (idx < len ? data [idx] & 255 : 0);
+      cnt --;
+      idx ++;
+   }
+   return v;
+}
+
+int sameaddr (struct sockaddr_in *a, struct sockaddr_in *b) {
+   return (a->sin_addr.s_addr == b->sin_addr.s_addr &&
+           a->sin_port == b->sin_port);
+}
+
+void process (peer_t *p, char *d, int len, uv_udp_t *io,
+              struct sockaddr_in *addr)
+{
+   unsigned char *data = (unsigned char *)d;
+   int id = getint (data, len, 0, 3);
+   int flg = getint (data, len, 3, 1);
+   int ack = getint (data, len, 4, 4);
+   int pck = getint (data, len, 8, 4);
+   fprintf (stderr, "Process(%d)...%d/%x/%d/%d\n", len, id, flg, ack, pck);
+   if (len < 4) {
+      /* Initial frame; contents are actually irrelevant. */
+#ifndef CLT
+      if (!p) {
+         /* We can only accept new connections server-side. */
+
+         /* We need to look into the peer list if there is currently one
+          * for this remote address. Otherwise we'd create one for each
+          * retransmitted connection request.
+          */
+         for (p = peerlist; p; p = p->next) {
+            if (sameaddr (&p->addr, addr)) break;
+         }
+         if (!p) {
+            int nid = time (0) ^ getpid ();
+            p = peerlist;
+            while (1) {
+               nid &= 0x7fffff; /* This is always done at least once. */
+               if (p->id == nid) {
+                  nid --;
+                  p = peerlist;
+               } else {
+                  p = p->next;
+               }
+            }
+            p = malloc (sizeof (peer_t));
+            start_peer (p, *addr, nid);
+            p->next = peerlist;
+            peerlist = p;
+         }
+      }
+#endif
+      return;
+   } else {
+      /* Regular frame:
+       * 3 bytes: Connection identity
+       * 1 byte: Flags
+       * 4 bytes: Acknowledgement number
+       * 4 bytes: Packet number
+       * n bytes: Data
+       *
+       * 8 byte size means ack-only packet; 12 byte size is an
+       * empty data packet which means EOF on the connection.
+       * Data packets need to contain at least one byte of data.
+       */
+      fprintf (stderr, "Regular frame\n");
+   }
 }
 
 void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
@@ -53,17 +149,25 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
       fprintf (stderr, "Recv from %s\n", sender);
    } else {
       fprintf(stderr, "Recv from unknown\n");
+      free(buf.base);
+      return;
    }
 
-   free(buf.base);
+   dumpbuf ("recv", buf, nread);
+
+   process (req->data, buf.base, nread, req, (struct sockaddr_in *)addr);
+
+   free (buf.base);
 }
 
-void start_peer (peer_t *p) {
+#ifdef CLT
+void start_peer (peer_t *p, struct sockaddr_in ad, int id) {
    // Assume tcpsock already set up (non-reading)
    uv_timer_init (loop, &p->timer);
    p->timer.data = p;
    uv_timer_start (&p->timer, fire, 1000, 0);
-   p->addr = uv_ip4_addr ("127.0.0.1", 9020);
+   p->addr = ad;
+   p->id = id;
    fprintf (stderr, "start_peer\n");
 
    uv_udp_init (loop, &p->udp);
