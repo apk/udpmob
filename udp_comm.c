@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define AT (fprintf (stderr, "__%s:%d__\n", __FILE__, __LINE__))
+
 #include "uv.h"
 
 uv_loop_t *loop;
@@ -16,6 +18,8 @@ typedef struct peer {
    struct peer *next;
 #endif
    int id;
+   int ack; /* Ack to send. */
+   int seq; /* Sequence number of first packet in send queue. */
 
    uv_tcp_t tcpsock;
    struct sockaddr_in addr; // Peer addr (current one for server)
@@ -57,6 +61,12 @@ void fire (uv_timer_t* handle, int status) {
    uv_udp_send (req, &p->udp, buf, 1, p->addr, on_send);
 }
 #endif
+
+void peer_send_ack (peer_t *p) {
+   /* Send an ack-only frame now. */
+}
+
+void peer_start (peer_t *p, struct sockaddr_in ad, int id);
 
 int getint (unsigned char *data, int len, int off, int cnt) {
    int v = 0;
@@ -101,6 +111,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             p = peerlist;
             while (1) {
                nid &= 0x7fffff; /* This is always done at least once. */
+               if (!p) break;
                if (p->id == nid) {
                   nid --;
                   p = peerlist;
@@ -109,10 +120,11 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
                }
             }
             p = malloc (sizeof (peer_t));
-            start_peer (p, *addr, nid);
+            peer_start (p, *addr, nid);
             p->next = peerlist;
             peerlist = p;
          }
+         peer_send_ack (p);
       }
 #endif
       return;
@@ -160,19 +172,29 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
    free (buf.base);
 }
 
-#ifdef CLT
-void start_peer (peer_t *p, struct sockaddr_in ad, int id) {
+void peer_start (peer_t *p, struct sockaddr_in ad, int id) {
    // Assume tcpsock already set up (non-reading)
+#ifdef CLT
    uv_timer_init (loop, &p->timer);
    p->timer.data = p;
    uv_timer_start (&p->timer, fire, 1000, 0);
+#endif
    p->addr = ad;
    p->id = id;
-   fprintf (stderr, "start_peer\n");
+   {
+      char sender[17] = { 0 };
+      uv_ip4_name(&ad, sender, 16);
+      fprintf (stderr, "peer_start(%d:%s:%d)\n", p->id,
+               sender, ntohs (ad.sin_port));
+   }
 
+   p->ack = 0;
+   p->seq = 0;
+
+#ifdef CLT
    uv_udp_init (loop, &p->udp);
    p->udp.data = p;
    uv_udp_bind (&p->udp, uv_ip4_addr("0.0.0.0", 0), 0);
    uv_udp_recv_start (&p->udp, alloc_buffer, udp_recv);
-}
 #endif
+}
