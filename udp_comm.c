@@ -346,7 +346,10 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             if (p->id == id) break;
          }
          if (!p) {
-            fprintf (stderr, "Ignoring unknown peer %d\n", id);
+            char oa[17] = { 0 };
+            uv_ip4_name(addr, oa, 16);
+            fprintf (stderr, "Ignoring unknown peer %d from %s:%d\n",
+                     id, oa, ntohs (addr->sin_port));
             return;
          }
          if (!sameaddr (&p->addr, addr)) {
