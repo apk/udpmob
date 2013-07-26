@@ -305,6 +305,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             if (sameaddr (&p->addr, addr)) break;
          }
          if (!p) {
+            char oa[17] = { 0 };
             uv_connect_t *req = malloc (sizeof (uv_connect_t));
             int nid = time (0) ^ getpid ();
             p = peerlist;
@@ -318,6 +319,8 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
                   p = p->next;
                }
             }
+            uv_ip4_name(addr, oa, 16);
+            fprintf (stderr, "clt %s:%d\n", oa, ntohs (addr->sin_port));
             p = malloc (sizeof (peer_t));
             peer_start (p, *addr, nid, 0);
             p->next = peerlist;
@@ -346,7 +349,16 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             fprintf (stderr, "Ignoring unknown peer %d\n", id);
             return;
          }
-         p->addr = *addr;
+         if (!sameaddr (&p->addr, addr)) {
+            char oa[17] = { 0 };
+            uv_ip4_name(&p->addr, oa, 16);
+            char na[17] = { 0 };
+            uv_ip4_name(addr, na, 16);
+            fprintf (stderr, "clt %s:%d => %s:%d\n",
+                     oa, ntohs (p->addr.sin_port),
+                     na, ntohs (addr->sin_port));
+            p->addr = *addr;
+         }
 #else
          fprintf (stderr, "No peer?\n");
          return;
