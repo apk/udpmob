@@ -27,6 +27,8 @@ uv_udp_t recv_socket;
 typedef struct data {
    struct data *next;
    int len;
+   int ena;
+   uint64_t point;
    unsigned char data [1];
 } data_t;
 
@@ -34,6 +36,8 @@ data_t *data_make (unsigned char *data, int len) {
    data_t *d = malloc (sizeof (data_t) + len);
    if (len) memcpy (d->data, data, len);
    d->len = len;
+   d->point = now ();
+   d->ena = 1;
    return d;
 }
 
@@ -51,7 +55,6 @@ typedef struct peer {
    data_t *sndlist; /* Enqueued data. */
 
    uint64_t next_ack;
-   uint64_t next_data;
    uint64_t last_recv;
 
    int flags;
@@ -110,7 +113,7 @@ void sbuf_send (sbuf_t *sb, peer_t *p) {
    uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
    char sender[17] = { 0 };
    uv_ip4_name(&p->addr, sender, 16);
-   if (debug) {
+   if (debug > 2) {
       fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
       dumpbuf (" =>", *sb->buf, sb->sz);
    }
@@ -141,6 +144,9 @@ void peer_send_req (peer_t *p) {
    unsigned char *d = sbuf_init (&S, 1);
    d [0] = 0;
    sbuf_send (&S, p);
+   if (debug > 0) {
+      fprintf (stderr, "peer_send_req()\n");
+   }
    /* Abuse the ack timer for our resends */
    p->next_ack = now () + 1200;
    peer_set_timer (p);
@@ -150,7 +156,7 @@ void peer_send_ack (peer_t *p) {
    /* Send an ack-only frame now. */
    sbuf_t S;
    unsigned char *d = sbuf_init (&S, 8);
-   if (debug > 1) {
+   if (debug > 0) {
       fprintf (stderr, "peer_send_ack(%d,%d)\n", p->id, p->ack);
    }
    putint (&d, p->id, 3);
@@ -161,34 +167,40 @@ void peer_send_ack (peer_t *p) {
    peer_set_timer (p);
 }
 
-void peer_send_data (peer_t *p) {
-   /* Send an data frame now (the first one, or crash if none). */
+int peer_send_data (peer_t *p) {
    sbuf_t S;
-   unsigned char *d = sbuf_init (&S, 12 + p->sndlist->len);
-   if (debug > 1) {
-      fprintf (stderr, "peer_send_data(%d,%d,%d,%d)\n",
-               p->id, p->ack, p->seq, p->sndlist->len);
+   data_t *e;
+   int n = 0;
+   for (e = p->sndlist; e && n < 9; e = e->next, n ++) {
+      if (e->ena && e->point <= now ()) {
+         unsigned char *d = sbuf_init (&S, 12 + e->len);
+         if (debug > 0) {
+            fprintf (stderr, "peer_send_data(%d,%d,%d,%d)\n",
+                     p->id, p->ack, p->seq, e->len);
+         }
+         putint (&d, p->id, 3);
+         *d ++ = 0;
+         putint (&d, p->ack, 4);
+         putint (&d, p->seq + n, 4);
+         memcpy (d, e->data, e->len);
+         sbuf_send (&S, p);
+         e->point = now () + 800;
+         e->ena = 0;
+         return 1;
+      }
    }
-   putint (&d, p->id, 3);
-   *d ++ = 0;
-   putint (&d, p->ack, 4);
-   putint (&d, p->seq, 4);
-   memcpy (d, p->sndlist->data, p->sndlist->len);
-   sbuf_send (&S, p);
-   p->next_data = now () + 1800;
-   peer_set_timer (p);
+   return 0;
 }
 
 void peer_send_something (peer_t *p) {
    uint64_t n = now ();
    if (p->id == -1) return;
-   if (p->sndlist && (p->next_data <= n)) {
-      peer_send_data (p);
+   if (peer_send_data (p)) {
+      /* nothing more, is in condition... */
    } else if (p->next_ack <= n) {
       peer_send_ack (p);
-   } else {
-      peer_set_timer (p);
    }
+   peer_set_timer (p);
 }
 
 void fire (uv_timer_t* handle, int status) {
@@ -206,8 +218,9 @@ void fire (uv_timer_t* handle, int status) {
 
 void peer_set_timer (peer_t *p) {
    uint64_t k = p->next_ack;
-   if (p->sndlist && p->next_data < k) {
-      k = p->next_data;
+   data_t *e = p->sndlist;
+   if (e && e->ena && e->point < k) {
+      k = e->point;
    }
    k -= now ();
    if (k < 200) k = 200;
@@ -285,14 +298,14 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
    int flg = getint (data, len, 3, 1);
    int ack = getint (data, len, 4, 4);
    int pck = getint (data, len, 8, 4);
-   if (debug > 1) {
+   if (debug > 0) {
       fprintf (stderr, "Process(%d)...%d/%x/%d/%d\n", len, id, flg, ack, pck);
       if (p) {
          fprintf (stderr, "          %d/%d/%d\n", p->id, p->seq, p->ack);
       }
    }
    if (len < 4) {
-      /* Initial frame; contents are actually irrelevant. */
+      /* Initial frame; contents are actually irrelevant (yet). */
 #ifndef CLT
       if (!p) {
          /* We can only accept new connections server-side. */
@@ -389,7 +402,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
          p->sndlist = d->next;
          data_drop (d);
          p->seq ++;
-         p->next_data = now ();
+         p->next_ack = now ();
       }
       if (len >= 12) {
          /* Have data or EOF */
@@ -398,13 +411,13 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
                      pck, p->ack, p->open, len);
          }
          if (p->ack > pck) {
-            /* Peer sends old packets, get him updated. */
+            /* Peer sent old packet, get him updated. */
             p->next_ack = now ();
          }
          if (pck == p->ack && p->open == 1) {
             /* Packet is in sequence (otherwise we ignore it),
              * and output is open (otherwise we also rely on
-             * retransmission.
+             * retransmission).
              */
             if (len == 12) {
                /* EOF */
@@ -424,6 +437,12 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             p->ack ++;
             /* We processed a packet, send the ack immediately. */
             p->next_ack = now ();
+         }
+      }
+      { data_t *d;
+         int n = 0;
+         for (d = p->sndlist; d && n < 3; d = d->next, n ++) {
+            d->ena = 1;
          }
       }
       peer_send_something (p);
@@ -455,7 +474,7 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
    if (addr) {
       char sender[17] = { 0 };
       uv_ip4_name((struct sockaddr_in*) addr, sender, 16);
-      if (debug) {
+      if (debug > 2) {
          fprintf (stderr, "Recv from %s:%d\n", sender,
                   ntohs (((struct sockaddr_in *) addr)->sin_port));
          dumpbuf (" <=", buf, nread);
@@ -493,27 +512,25 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
          return;
       }
    }
-   if (!p->sndlist) {
-      p->next_data = now ();
-   }
    for (pp = &p->sndlist; *pp; pp = &(*pp)->next);
    if (nread < 1440) {
       d = data_make ((unsigned char *)buf.base, nread);
       d->next = *pp;
       *pp = d;
+      peer_send_something (p);
    } else {
-      int p = 0;
-      while (p < nread) {
-         int s = nread - p;
+      int pos = 0;
+      while (pos < nread) {
+         int s = nread - pos;
          if (s > 1400) s = 1400;
-         d = data_make (p + (unsigned char *)buf.base, s);
-         p += s;
+         d = data_make (pos + (unsigned char *)buf.base, s);
+         pos += s;
          d->next = *pp;
          *pp = d;
          pp = &d->next;
+         peer_send_something (p);
       }
    }
-   peer_send_something (p);
    if (nread == 0) p->flags |= FL_IEOF;
 }
 
@@ -537,7 +554,6 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp) {
    p->ack = 0;
    p->seq = 0;
    p->next_ack = now ();
-   p->next_data = now ();
    p->last_recv = now ();
    p->sndlist = 0;
 
