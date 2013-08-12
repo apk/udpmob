@@ -192,13 +192,30 @@ int peer_send_data (peer_t *p) {
    return 0;
 }
 
+void fire (uv_timer_t* handle, int status);
+
 void peer_send_something (peer_t *p) {
    uint64_t n = now ();
    if (p->id == -1) return;
-   if (peer_send_data (p)) {
-      /* nothing more, is in condition... */
-   } else if (p->next_ack <= n) {
-      peer_send_ack (p);
+#ifndef CLT
+   if (p->last_recv + 30000 < now ()) {
+      /* If we as a server didn't hear anything from
+       * the other side we're not going to send anything
+       * until we hear back. We don't want to sprinkle
+       * an IP that may not even belong to the client
+       * anymore. We can also slow down the timer,
+       * any new receive will restart it.
+       */
+      uv_timer_start (&p->timer, fire, 1500, 0);
+      return;
+   }
+#endif
+   {
+      if (peer_send_data (p)) {
+         /* nothing more, is in condition... */
+      } else if (p->next_ack <= n) {
+         peer_send_ack (p);
+      }
    }
    peer_set_timer (p);
 }
