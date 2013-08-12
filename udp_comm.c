@@ -335,6 +335,8 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             if (sameaddr (&p->addr, addr)) break;
          }
          if (!p) {
+            struct reminfo *remp =
+               rems + (len > 0 && data [0] < nrem ? data [0] : 0);
             char oa[17] = { 0 };
             uv_connect_t *req = malloc (sizeof (uv_connect_t));
             int nid = time (0) ^ getpid ();
@@ -360,7 +362,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             uv_tcp_init (loop, &p->tcpsock);
             req->data = p;
             uv_tcp_connect (req, &p->tcpsock,
-                            uv_ip4_addr (remaddr, remport),
+                            uv_ip4_addr (remp->remaddr, remp->remport),
                             on_connect);
          }
          peer_send_ack (p);

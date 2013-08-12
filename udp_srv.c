@@ -1,6 +1,11 @@
 // -*- mode: C; c-basic-offset: 3; tab-width: 8; indent-tabs-mode: nil -*-
 
-static char *remaddr = "127.0.0.1";
+static struct reminfo {
+   char *remaddr;
+   int remport;
+} rems [256] = { { "127.0.0.1", 22 } };
+
+static int nrem = 0;
 static int remport = 22;
 static int localport = 9020;
 
@@ -56,11 +61,22 @@ int main (int argc, char **argv) {
    for (i = 1; i < argc; i ++) {
       switch (argv [i] [0]) {
       case 'a':
-         remaddr = argv [i] + 1;
+         if (nrem > 255) {
+            fprintf (stderr, "Too many addrs...\n");
+         } else {
+            char *h = argv [i] + 1;
+            if (!*h) h = "127.0.0.1";
+            rems [nrem].remaddr = h;
+            rems [nrem].remport = remport;
+            nrem ++;
+         }
          break;
       case 'p':
          remport = atoi (argv [i] + 1);
          if (!remport) remport = 9000;
+         if (nrem == 0) {
+            rems [0].remport = remport;
+         }
          break;
       case 'l':
          localport = atoi (argv [i] + 1);
@@ -75,7 +91,11 @@ int main (int argc, char **argv) {
       }
    }
 
-   fprintf (stderr, "%d:%s:%d\n", localport, remaddr, remport);
+   fprintf (stderr, "%d:\n", localport);
+   for (i = 0; i < nrem || i < 1; i ++) {
+      fprintf (stderr, "  %d:  %s:%d\n",
+               i, rems [i].remaddr, rems [i].remport);
+   }
 
    loop = uv_default_loop();
 
