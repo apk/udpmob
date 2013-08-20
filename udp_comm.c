@@ -177,7 +177,7 @@ int peer_send_data (peer_t *p) {
          unsigned char *d = sbuf_init (&S, 12 + e->len);
          if (debug > 0) {
             fprintf (stderr, "peer_send_data(%d,%d,%d,%d)\n",
-                     p->id, p->ack, p->seq, e->len);
+                     p->id, p->ack, p->seq + n, e->len);
          }
          putint (&d, p->id, 3);
          *d ++ = 0;
