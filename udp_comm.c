@@ -57,6 +57,7 @@ typedef struct peer {
    uint64_t next_ack;
    uint64_t last_recv;
 
+   int sel; /* Output selector, client only */
    int flags;
 #define FL_IEOF 1 /* EOF on tcp->udp */
 #define FL_OEOF 2 /* EOF on udp->tcp */
@@ -142,7 +143,7 @@ void peer_send_req (peer_t *p) {
    /* Send an initial request frame. */
    sbuf_t S;
    unsigned char *d = sbuf_init (&S, 1);
-   d [0] = 0;
+   d [0] = p->sel;
    sbuf_send (&S, p);
    if (debug > 0) {
       fprintf (stderr, "peer_send_req()\n");
@@ -560,7 +561,8 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp) {
    uv_timer_start (&p->timer, fire, 30, 0);
 
    p->addr = ad;
-   p->id = id;
+   p->id = havetcp ? -1 : id;
+   p->sel = id;
    p->flags = 0;
    p->open = 0;
    {
