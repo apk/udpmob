@@ -486,6 +486,7 @@ void udp_recv (uv_udp_t *req, ssize_t nread, const uv_buf_t *buf,
    if (nread == -1) {
       fprintf(stderr, "Read error %s\n", uv_err_name(nread));
       uv_close((uv_handle_t*) req, NULL);
+      free (buf->base);
       return;
    }
 
@@ -501,10 +502,12 @@ void udp_recv (uv_udp_t *req, ssize_t nread, const uv_buf_t *buf,
 #if 0
       fprintf(stderr, "Recv from unknown\n");
 #endif
+      free (buf->base);
       return;
    }
 
    process (req->data, buf->base, nread, req, (struct sockaddr_in *)addr);
+   free (buf->base);
 
 }
 
@@ -512,6 +515,7 @@ void tcp_read (uv_stream_t *str, ssize_t nread, const uv_buf_t *buf) {
    data_t *d, **pp;
    peer_t *p = str->data;
    if (nread == 0) {
+      free (buf->base);
       return;
    }
    if (nread == UV_EOF) {
@@ -524,6 +528,7 @@ void tcp_read (uv_stream_t *str, ssize_t nread, const uv_buf_t *buf) {
       } else {
          fprintf(stderr, "Read error %s\n", uv_err_name(nread));
          peer_kill(p, "dead tcp");
+         free (buf->base);
          return;
       }
    }
@@ -547,6 +552,7 @@ void tcp_read (uv_stream_t *str, ssize_t nread, const uv_buf_t *buf) {
       }
    }
    if (nread == 0) p->flags |= FL_IEOF;
+   free (buf->base);
 }
 
 void peer_start (peer_t *p, const struct sockaddr_in *ad, int id, int havetcp) {
