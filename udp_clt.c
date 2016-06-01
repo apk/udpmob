@@ -2,7 +2,6 @@
 
 static char *remaddr = "127.0.0.1";
 static int remport = 9020;
-static int localport = 2222;
 
 #define CLT
 #include "udp_comm.c"
@@ -47,7 +46,7 @@ static void make_server (int port, int sel) {
     * right now, libuv isn't scary but...)
     */
    struct sockaddr_in bind_addr;
-   uv_ip4_addr ("0.0.0.0", localport, &bind_addr);
+   uv_ip4_addr ("0.0.0.0", port, &bind_addr);
    uv_tcp_bind (&clt->server, (struct sockaddr *)&bind_addr, 0);
    int r = uv_listen ((uv_stream_t*) &clt->server, 128, on_new_connection);
    if (r) {
@@ -60,6 +59,9 @@ static void make_server (int port, int sel) {
 int main (int argc, char **argv) {
    int i;
    int cnt = 0;
+   int localport;
+
+   loop = uv_default_loop ();
 
    for (i = 1; i < argc; i ++) {
       switch (argv [i] [0]) {
@@ -86,6 +88,5 @@ int main (int argc, char **argv) {
 
    fprintf (stderr, "%d:%s:%d\n", localport, remaddr, remport);
 
-   loop = uv_default_loop ();
    return uv_run (loop, UV_RUN_DEFAULT);
 }
