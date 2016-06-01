@@ -25,7 +25,9 @@ void on_new_connection (uv_stream_t *server, int status) {
    peer_t *peer = malloc (sizeof (peer_t));
    uv_tcp_init (loop, &peer->tcpsock);
    if (uv_accept (server, (uv_stream_t*) &peer->tcpsock) == 0) {
-      peer_start (peer, uv_ip4_addr (remaddr, remport), clt->sel, 1);
+      struct sockaddr_in sin;
+      uv_ip4_addr (remaddr, remport, &sin);
+      peer_start (peer, (struct sockaddr_in *)&sin, clt->sel, 1);
       peer_open (peer);
    }
    else {
@@ -44,12 +46,13 @@ static void make_server (int port, int sel) {
     * incoming connection. (I'm not going into stdin/out
     * right now, libuv isn't scary but...)
     */
-   struct sockaddr_in bind_addr = uv_ip4_addr ("0.0.0.0", localport);
-   uv_tcp_bind (&clt->server, bind_addr);
+   struct sockaddr_in bind_addr;
+   uv_ip4_addr ("0.0.0.0", localport, &bind_addr);
+   uv_tcp_bind (&clt->server, (struct sockaddr *)&bind_addr, 0);
    int r = uv_listen ((uv_stream_t*) &clt->server, 128, on_new_connection);
    if (r) {
       fprintf (stderr, "Listen error %s\n",
-               uv_err_name (uv_last_error (loop)));
+               uv_err_name (r));
       exit (1);
    }
 }

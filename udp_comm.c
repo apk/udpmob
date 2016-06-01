@@ -12,8 +12,8 @@ static int debug = 0;
 
 uv_loop_t *loop;
 
-uv_buf_t alloc_buffer(uv_handle_t *handle, size_t suggested_size) {
-   return uv_buf_init((char*) malloc(suggested_size), suggested_size);
+void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
+   *buf = uv_buf_init((char*) malloc(suggested_size), suggested_size);
 }
 
 uint64_t now () {
@@ -75,7 +75,7 @@ typedef struct peer {
 peer_t *peerlist = 0;
 #endif
 
-void dumpbuf(const char *name, uv_buf_t buf, int n) {
+void dumpbuf(const char *name, const uv_buf_t *buf, int n) {
    int i;
    fprintf (stderr, "%s:   :", name);
    for (i = 0; i < n; i ++) {
@@ -86,7 +86,7 @@ void dumpbuf(const char *name, uv_buf_t buf, int n) {
       if (i && !(i % 16)) {
          fprintf (stderr, "\n%s:%3d:", name, i);
       }
-      fprintf (stderr, " %02x", buf.base [i] & 255);
+      fprintf (stderr, " %02x", buf->base [i] & 255);
    }
    fprintf (stderr, "\n");
 }
@@ -116,7 +116,7 @@ void sbuf_send (sbuf_t *sb, peer_t *p) {
    uv_ip4_name(&p->addr, sender, 16);
    if (debug > 2) {
       fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
-      dumpbuf (" =>", *sb->buf, sb->sz);
+      dumpbuf (" =>", sb->buf, sb->sz);
    }
    uv_udp_send (req,
 #ifdef CLT
@@ -124,7 +124,7 @@ void sbuf_send (sbuf_t *sb, peer_t *p) {
 #else
                 &recv_socket,
 #endif
-                sb->buf, 1, p->addr, on_send);
+                sb->buf, 1, (struct sockaddr *)&p->addr, on_send);
 }
 
 void putint (unsigned char **dp, int val, int len) {
@@ -193,7 +193,7 @@ int peer_send_data (peer_t *p) {
    return 0;
 }
 
-void fire (uv_timer_t* handle, int status);
+void fire (uv_timer_t* handle);
 
 void peer_send_something (peer_t *p) {
    uint64_t n = now ();
@@ -221,11 +221,8 @@ void peer_send_something (peer_t *p) {
    peer_set_timer (p);
 }
 
-void fire (uv_timer_t* handle, int status) {
+void fire (uv_timer_t* handle) {
    peer_t *p = handle->data;
-   if (status) {
-      fprintf (stderr, "fire %d\n", status);
-   }
    if (p->id == -1) {
       peer_send_req (p);
    } else {
@@ -245,7 +242,7 @@ void peer_set_timer (peer_t *p) {
    uv_timer_start (&p->timer, fire, 1000, 0);
 }
 
-void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp);
+void peer_start (peer_t *p, const struct sockaddr_in *ad, int id, int havetcp);
 void peer_kill (peer_t *p, const char *why);
 void peer_open (peer_t *p);
 
@@ -336,6 +333,7 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             if (sameaddr (&p->addr, addr)) break;
          }
          if (!p) {
+            struct sockaddr_in sin;
             struct reminfo *remp =
                rems + (len > 0 && data [0] < nrem ? data [0] : 0);
             char oa[17] = { 0 };
@@ -355,15 +353,16 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
             uv_ip4_name(addr, oa, 16);
             fprintf (stderr, "clt %s:%d\n", oa, ntohs (addr->sin_port));
             p = malloc (sizeof (peer_t));
-            peer_start (p, *addr, nid, 0);
+            peer_start (p, addr, nid, 0);
             p->next = peerlist;
             peerlist = p;
             /* Initiate outgoing connection. */
             p->open == -1;
             uv_tcp_init (loop, &p->tcpsock);
             req->data = p;
+            uv_ip4_addr (remp->remaddr, remp->remport, &sin);
             uv_tcp_connect (req, &p->tcpsock,
-                            uv_ip4_addr (remp->remaddr, remp->remport),
+                            (struct sockaddr *)&sin,
                             on_connect);
          }
          peer_send_ack (p);
@@ -481,13 +480,12 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
    }
 }
 
-void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
-               struct sockaddr *addr, unsigned flags)
+void udp_recv (uv_udp_t *req, ssize_t nread, const uv_buf_t *buf,
+               const struct sockaddr *addr, unsigned flags)
 {
    if (nread == -1) {
-      fprintf(stderr, "Read error %s\n", uv_err_name(uv_last_error(loop)));
+      fprintf(stderr, "Read error %s\n", uv_err_name(nread));
       uv_close((uv_handle_t*) req, NULL);
-      free(buf.base);
       return;
    }
 
@@ -503,16 +501,14 @@ void udp_recv (uv_udp_t *req, ssize_t nread, uv_buf_t buf,
 #if 0
       fprintf(stderr, "Recv from unknown\n");
 #endif
-      free(buf.base);
       return;
    }
 
-   process (req->data, buf.base, nread, req, (struct sockaddr_in *)addr);
+   process (req->data, buf->base, nread, req, (struct sockaddr_in *)addr);
 
-   free (buf.base);
 }
 
-void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
+void tcp_read (uv_stream_t *str, ssize_t nread, const uv_buf_t *buf) {
    data_t *d, **pp;
    peer_t *p = str->data;
    if (nread == 0) {
@@ -522,19 +518,18 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
       fprintf(stderr, "EOF on peer...\n");
       nread = 0; /* Hackyflag. */
    } else if (nread < 0) {
-      uv_err_t e = uv_last_error (loop);
-      if (e.code == UV_EOF) {
+      if (nread == UV_EOF) {
          /* XXX Urks, EOF yields nread==-1 and last_error == EOF :-( */
          nread = 0; /* Also hack. */
       } else {
-         fprintf(stderr, "Read error %s\n", uv_err_name(e));
+         fprintf(stderr, "Read error %s\n", uv_err_name(nread));
          peer_kill(p, "dead tcp");
          return;
       }
    }
    for (pp = &p->sndlist; *pp; pp = &(*pp)->next);
    if (nread < 1440) {
-      d = data_make ((unsigned char *)buf.base, nread);
+      d = data_make ((unsigned char *)buf->base, nread);
       d->next = *pp;
       *pp = d;
       peer_send_something (p);
@@ -543,7 +538,7 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
       while (pos < nread) {
          int s = nread - pos;
          if (s > 1400) s = 1400;
-         d = data_make (pos + (unsigned char *)buf.base, s);
+         d = data_make (pos + (unsigned char *)buf->base, s);
          pos += s;
          d->next = *pp;
          *pp = d;
@@ -554,22 +549,25 @@ void tcp_read (uv_stream_t *str, ssize_t nread, uv_buf_t buf) {
    if (nread == 0) p->flags |= FL_IEOF;
 }
 
-void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp) {
+void peer_start (peer_t *p, const struct sockaddr_in *ad, int id, int havetcp) {
+#ifdef CLT
+   struct sockaddr_in nulladdr;
+#endif
    // Assume tcpsock already set up (non-reading)
    uv_timer_init (loop, &p->timer);
    p->timer.data = p;
    uv_timer_start (&p->timer, fire, 30, 0);
 
-   p->addr = ad;
+   p->addr = *ad;
    p->id = havetcp ? -1 : id;
    p->sel = id;
    p->flags = 0;
    p->open = 0;
    {
       char sender[17] = { 0 };
-      uv_ip4_name(&ad, sender, 16);
+      uv_ip4_name(ad, sender, 16);
       fprintf (stderr, "peer_start(%d:%s:%d)\n", p->id,
-               sender, ntohs (ad.sin_port));
+               sender, ntohs (ad->sin_port));
    }
 
    p->ack = 0;
@@ -581,7 +579,8 @@ void peer_start (peer_t *p, struct sockaddr_in ad, int id, int havetcp) {
 #ifdef CLT
    uv_udp_init (loop, &p->udp);
    p->udp.data = p;
-   uv_udp_bind (&p->udp, uv_ip4_addr("0.0.0.0", 0), 0);
+   uv_ip4_addr ("0.0.0.0", 0, &nulladdr);
+   uv_udp_bind (&p->udp, (struct sockaddr *)&nulladdr, 0);
    uv_udp_recv_start (&p->udp, alloc_buffer, udp_recv);
 #endif
 }

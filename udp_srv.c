@@ -18,7 +18,7 @@ void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, 
 
    fprintf (stderr, "nread: %d\n", (int)nread);
    if (nread == -1) {
-      fprintf(stderr, "Read error %s\n", uv_err_name(uv_last_error(loop)));
+      fprintf(stderr, "Read error %s\n", uv_err_name(nread));
       uv_close((uv_handle_t*) req, NULL);
       free(buf.base);
       return;
@@ -57,6 +57,7 @@ void on_read(uv_udp_t *req, ssize_t nread, uv_buf_t buf, struct sockaddr *addr, 
 
 int main (int argc, char **argv) {
    int i;
+   struct sockaddr_in sin;
 
    for (i = 1; i < argc; i ++) {
       switch (argv [i] [0]) {
@@ -102,8 +103,8 @@ int main (int argc, char **argv) {
    /* Create upd server socket, and process data.
     */
    uv_udp_init(loop, &recv_socket);
-   struct sockaddr_in recv_addr = uv_ip4_addr("0.0.0.0", localport);
-   uv_udp_bind(&recv_socket, recv_addr, 0);
+   uv_ip4_addr("0.0.0.0", localport, &sin);
+   uv_udp_bind(&recv_socket, (struct sockaddr *)&sin, 0);
    recv_socket.data = 0;
    uv_udp_recv_start(&recv_socket, alloc_buffer, udp_recv);
 
