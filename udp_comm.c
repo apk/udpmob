@@ -91,13 +91,6 @@ void dumpbuf(const char *name, const uv_buf_t *buf, int n) {
    fprintf (stderr, "\n");
 }
 
-void on_send (uv_udp_send_t* req, int status) {
-   if (status) {
-      fprintf (stderr, "on_send %d\n", status);
-   }
-   /* XXX Is there anything we might need to free? */
-}
-
 typedef struct sbuf {
    uv_buf_t *buf;
    int sz; /* XXX Probably superfluous, and then the whole struct. */
@@ -110,15 +103,32 @@ unsigned char *sbuf_init (sbuf_t *sb, int len) {
    return (unsigned char *)sb->buf->base;
 }
 
+struct send_data {
+   uv_udp_send_t req;
+   uv_buf_t *buf;
+};
+
+void on_send (uv_udp_send_t* req, int status) {
+   if (status) {
+      fprintf (stderr, "on_send %d\n", status);
+   }
+   /* XXX Is there anything we might need to free? */
+   free (((struct send_data *)req->data)->buf->base);
+   free (((struct send_data *)req->data)->buf);
+   free (req->data);
+}
+
 void sbuf_send (sbuf_t *sb, peer_t *p) {
-   uv_udp_send_t *req = malloc (sizeof (uv_udp_send_t));
+   struct send_data *d = malloc (sizeof (struct send_data));
    char sender[17] = { 0 };
    uv_ip4_name(&p->addr, sender, 16);
    if (debug > 2) {
       fprintf (stderr, "Send to %s:%d\n", sender, ntohs (p->addr.sin_port));
       dumpbuf (" =>", sb->buf, sb->sz);
    }
-   uv_udp_send (req,
+   d->buf = sb->buf;
+   d->req.data = d;
+   uv_udp_send (&d->req,
 #ifdef CLT
                 &p->udp,
 #else
@@ -261,6 +271,11 @@ void on_connect (uv_connect_t *req, int status) {
 }
 #endif
 
+struct write_data {
+   uv_write_t req;
+   uv_buf_t *buf;
+};
+
 void on_write (uv_write_t *req, int status) {
    peer_t *p = req->data;
    if (status) {
@@ -272,7 +287,9 @@ void on_write (uv_write_t *req, int status) {
       /* Well, ok. */
       /* XXX Except that we probably have to free a buffer? */
    }
-   free (req);
+   free (((struct write_data *)req->data)->buf->base);
+   free (((struct write_data *)req->data)->buf);
+   free (req->data);
 }
 
 void on_shutdown (uv_shutdown_t *req, int status) {
@@ -445,12 +462,13 @@ void process (peer_t *p, char *d, int len, uv_udp_t *io,
                p->flags |= FL_OEOF;
             } else {
                /* Data */
-               uv_write_t *req = malloc (sizeof (uv_write_t));
+               struct write_data *d = malloc (sizeof (struct write_data));
                unsigned char *dp = malloc (len - 12);
-               uv_buf_t *buf = malloc (sizeof (uv_buf_t));
+               d->buf = malloc (sizeof (uv_buf_t));
                memcpy (dp, data + 12, len - 12);
-               buf [0] = uv_buf_init ((char *)dp, len - 12);
-               uv_write (req, (uv_stream_t*)&p->tcpsock, buf, 1, on_write);
+               d->buf [0] = uv_buf_init ((char *)dp, len - 12);
+               d->req.data = d;
+               uv_write (&d->req, (uv_stream_t*)&p->tcpsock, d->buf, 1, on_write);
 
             }
             p->ack ++;
