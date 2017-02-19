@@ -1,7 +1,7 @@
 all : exe/udp_clt exe/udp_srv
 
 CFLG= -I../localuv/include
-LFLG= ../localuv/lib/libuv.a -lpthread
+LFLG= ../localuv/lib/libuv.a -lpthread -lrt
 
 exe/udp_srv : exe/obj/udp_srv.o
 	@mkdir -p exe
