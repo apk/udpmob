@@ -37,6 +37,7 @@ void on_new_connection (uv_stream_t *server, int status) {
 
 static void make_server (int port, int sel) {
    struct clt *clt = malloc (sizeof (struct clt));
+   clt->sel = sel;
 
    uv_tcp_init (loop, &clt->server);
    clt->server.data = clt;
